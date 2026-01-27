@@ -154,6 +154,7 @@ io.on("connection", socket => {
       called: [],
       calledSet: new Set(),
       current: null,
+      chat: [], // 🆕 chat history
       claims: {
         FIRST_FIVE: null,
         FIRST_LINE: null,
@@ -166,6 +167,32 @@ io.on("connection", socket => {
     socket.join(roomCode);
     socket.emit("game_created", { roomCode });
   });
+
+
+socket.on("player_send_message", ({ roomCode, playerCode, message }) => {
+  const game = games[roomCode];
+  if (!game) return;
+
+  const sender =
+    playerCode === "HOST"
+      ? { playerName: "HOST" }
+      : game.players[playerCode];
+
+  if (!sender) return;
+
+  const chatMsg = {
+    user: sender.playerName,
+    message,
+    time: Date.now(),
+  };
+
+  game.chat.push(chatMsg);
+
+  io.to(roomCode).emit("chat_message", chatMsg);
+});
+
+
+
 
   // ---------- ADD PLAYER ----------
   socket.on("host_add_player", ({ roomCode, playerName }) => {
@@ -315,6 +342,7 @@ g.tickets[playerCode].push(ticket);
   current: g.current,
   claims: g.claims,
   allowAutoMark: g.players[playerCode].allowAutoMark, // 👈
+  chat: g.chat,
 });
 
       return;
@@ -392,7 +420,7 @@ io.to(roomCode).emit("claim_accepted", {
 });
 
 app.get("/", (req, res) => {
-  res.send("Tambola Server is running By Venkata Ramana Vegulla");
+  res.send("Tambola Server With chat is running By Venkata Ramana Vegulla ");
 });
 
 server.listen(2004, () =>
