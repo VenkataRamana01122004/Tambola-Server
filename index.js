@@ -158,7 +158,6 @@ io.on("connection", socket => {
   socket.on("host_create_game", () => {
   const roomCode = randomUUID().slice(0, 6).toUpperCase();
 
-<<<<<<< HEAD
   const game = games[roomCode] = {
     hostId: socket.id,
     players: {},
@@ -175,7 +174,6 @@ io.on("connection", socket => {
       FULL_HOUSE: null
     }
   };
-=======
     games[roomCode] = {
       hostId: socket.id,
       players: {},
@@ -192,7 +190,6 @@ io.on("connection", socket => {
         FULL_HOUSE: null
       }
     };
->>>>>>> 909c898eb1d8b52a30b8b91d392633f318b2e780
 
   socket.join(roomCode);
   socket.emit("game_created", { roomCode });
@@ -203,7 +200,6 @@ io.on("connection", socket => {
   );
   });
 
-<<<<<<< HEAD
  socket.on("sendEmoji", ({ roomCode, playerName, emoji }) => {
     io.to(roomCode).emit("receiveEmoji", {
       playerName,
@@ -221,8 +217,6 @@ io.on("connection", socket => {
 
 
 
-=======
->>>>>>> 909c898eb1d8b52a30b8b91d392633f318b2e780
 
 socket.on("player_send_message", ({ roomCode, playerCode, message }) => {
   const game = games[roomCode];
@@ -400,13 +394,11 @@ socket.on("player_join_with_code", ({ playerCode }) => {
 
     if (!player) continue;
 
-<<<<<<< HEAD
     // 🚨 Prevent duplicate active login
     if (player.socketId && player.socketId !== socket.id) {
       io.to(player.socketId).emit("force_logout", {
         reason: "You logged in from another device"
       });
-=======
       socket.join(roomCode);
       socket.emit("player_joined", {
   roomCode,
@@ -420,7 +412,6 @@ socket.on("player_join_with_code", ({ playerCode }) => {
 });
 
       return;
->>>>>>> 909c898eb1d8b52a30b8b91d392633f318b2e780
     }
 
     // 🔁 reconnect or fresh join
@@ -554,7 +545,7 @@ io.to(roomCode).emit("claim_accepted", {
 });
 
 app.get("/", (req, res) => {
-  res.send("Tambola Server With chat is running By Venkata Ramana Vegulla ");
+  res.send("Tambola Server With chat,Emoji,online statu is running By Venkata Ramana Vegulla ");
 });
 
 server.listen(2004, () =>
