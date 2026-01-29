@@ -18,6 +18,19 @@ const games = {};
 
 // ---------------- HELPERS ----------------
 
+function getPlayersTable(game) {
+  if (!game || !game.players) return [];
+
+  return Object.entries(game.players).map(
+    ([playerCode, p]) => ({
+      playerCode,
+      name: p.playerName,
+      status: p.status || "OFFLINE",
+      autoMark: !!p.allowAutoMark,
+    })
+  );
+}
+
 function generateRealTambolaTicketFixed() {
   // Step 1: Prepare numbers per column
   const columns = [];
@@ -115,7 +128,7 @@ function firstFive(ticket, called) {
 
 function lineComplete(ticket, startRow, called) {
   if (!Array.isArray(ticket)) return false;
-  if (!ticket[startRow]) return false; // 🔒 prevents crash
+  if (!ticket[startRow]) return false;
 
   for (let col = 0; col < 9; col++) {
     const num = ticket[startRow][col];
@@ -126,8 +139,6 @@ function lineComplete(ticket, startRow, called) {
   return true;
 }
 
-
-// Check if full house is complete (all numbers on ticket are called)
 function fullHouse(ticket, called) {
   for (let row = 0; row < 3; row++) {
     for (let col = 0; col < 9; col++) {
@@ -145,27 +156,76 @@ io.on("connection", socket => {
 
   // ---------- CREATE GAME ----------
   socket.on("host_create_game", () => {
-    const roomCode = randomUUID().slice(0, 6).toUpperCase();
+  const roomCode = randomUUID().slice(0, 6).toUpperCase();
 
-    games[roomCode] = {
-      hostId: socket.id,
-      players: {},
-      tickets: {},
-      called: [],
-      calledSet: new Set(),
-      current: null,
-      claims: {
-        FIRST_FIVE: null,
-        FIRST_LINE: null,
-        MIDDLE_LINE: null,
-        LAST_LINE: null,
-        FULL_HOUSE: null
-      }
-    };
+  const game = games[roomCode] = {
+    hostId: socket.id,
+    players: {},
+    tickets: {},
+    called: [],
+    calledSet: new Set(),
+    current: null,
+    chat: [],
+    claims: {
+      FIRST_FIVE: null,
+      FIRST_LINE: null,
+      MIDDLE_LINE: null,
+      LAST_LINE: null,
+      FULL_HOUSE: null
+    }
+  };
 
-    socket.join(roomCode);
-    socket.emit("game_created", { roomCode });
+  socket.join(roomCode);
+  socket.emit("game_created", { roomCode });
+
+  io.to(roomCode).emit(
+    "players_table_update",
+    getPlayersTable(game)
+  );
   });
+
+ socket.on("sendEmoji", ({ roomCode, playerName, emoji }) => {
+    io.to(roomCode).emit("receiveEmoji", {
+      playerName,
+      emoji,
+      time: Date.now(),
+    });
+  });
+
+  socket.on("sendEmojiToPlayer", ({ targetSocketId, emoji, from }) => {
+  io.to(targetSocketId).emit("receiveEmoji", {
+    playerName: from,
+    emoji,
+  });
+});
+
+
+
+
+socket.on("player_send_message", ({ roomCode, playerCode, message }) => {
+  const game = games[roomCode];
+  if (!game) return;
+
+  const sender =
+    playerCode === "HOST"
+      ? { playerName: "HOST" }
+      : game.players[playerCode];
+
+  if (!sender) return;
+
+  const chatMsg = {
+    user: sender.playerName,
+    message,
+    time: Date.now(),
+  };
+
+  game.chat.push(chatMsg);
+
+  io.to(roomCode).emit("chat_message", chatMsg);
+});
+
+
+
 
   // ---------- ADD PLAYER ----------
   socket.on("host_add_player", ({ roomCode, playerName }) => {
@@ -183,6 +243,12 @@ io.on("connection", socket => {
     g.tickets[playerCode] = [];
 
     io.to(roomCode).emit("player_added", { playerCode, playerName });
+    io.to(roomCode).emit(
+  "players_table_update",
+  getPlayersTable(games[roomCode])
+);
+
+
   });
 
   socket.on("toggle_player_auto_mark", ({ roomCode, playerCode, allowed }) => {
@@ -216,6 +282,12 @@ io.on("connection", socket => {
   delete game.tickets[playerCode];
 
   io.to(roomCode).emit("player_removed", { playerCode });
+  io.to(roomCode).emit(
+  "players_table_update",
+  getPlayersTable(games[roomCode])
+);
+
+
 });
 
 
@@ -298,30 +370,82 @@ g.tickets[playerCode].push(ticket);
 
 
   // ---------- PLAYER JOIN ----------
-  socket.on("player_join_with_code", ({ playerCode }) => {
+// ---------- PLAYER JOIN ----------
+socket.on("player_join_with_code", ({ playerCode }) => {
   for (const roomCode in games) {
     const g = games[roomCode];
-    if (g.tickets[playerCode]) {
+    const player = g.players[playerCode];
 
-      // ✅ store socket id
-      g.players[playerCode].socketId = socket.id;
+    if (!player) continue;
 
-      socket.join(roomCode);
-      socket.emit("player_joined", {
-  roomCode,
-  playerName: g.players[playerCode].playerName,
-  tickets: g.tickets[playerCode],
-  called: g.called,
-  current: g.current,
-  claims: g.claims,
-  allowAutoMark: g.players[playerCode].allowAutoMark, // 👈
-});
-
-      return;
+    // 🚨 Prevent duplicate active login
+    if (player.socketId && player.socketId !== socket.id) {
+      io.to(player.socketId).emit("force_logout", {
+        reason: "You logged in from another device"
+      });
     }
+
+    // 🔁 reconnect or fresh join
+    player.socketId = socket.id;
+    player.status = "ONLINE";
+
+    // ✅ IMPORTANT: join room BEFORE emitting updates
+    socket.join(roomCode);
+
+    // ✅ Send FULL players table (single source of truth)
+    io.to(roomCode).emit(
+  "players_table_update",
+  getPlayersTable(games[roomCode])
+);
+
+
+    // ✅ Send personal game state to this player
+    socket.emit("player_joined", {
+      roomCode,
+      playerName: player.playerName,
+      tickets: g.tickets[playerCode] || [],
+      called: g.called || [],
+      current: g.current || null,
+      claims: g.claims || {},
+      allowAutoMark: !!player.allowAutoMark,
+      chat: g.chat || [],
+    });
+
+    return;
   }
+
   socket.emit("join_error", { message: "Invalid player code" });
 });
+
+
+
+socket.on("disconnect", () => {
+  for (const roomCode in games) {
+    const g = games[roomCode];
+
+    for (const playerCode in g.players) {
+      const player = g.players[playerCode];
+
+      if (player.socketId === socket.id) {
+        player.socketId = null;
+        player.status = "OFFLINE";
+
+        const game = games[roomCode];
+
+io.to(roomCode).emit(
+  "players_table_update",
+  getPlayersTable(games[roomCode])
+);
+
+
+
+        return;
+      }
+    }
+  }
+});
+
+
 
 
   // ---------- CLAIM ----------
